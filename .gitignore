@@ -1,0 +1,75 @@
+# ============================================================
+# netgotchi .gitignore
+# Rule: when in doubt, exclude. Adding back is easier than
+# scrubbing a secret from git history (requires force push
+# and coordinated team pull -- painful at scale).
+# ============================================================
+
+# --- Secrets & Credentials -----------------------------------
+.env
+.env.*
+!.env.example       # the example template IS committed
+secrets/
+keys/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+auth.json
+
+# --- Packet Captures (NEVER commit) --------------------------
+# Captures can contain session tokens, PII, internal topology.
+# Even "test" captures have leaked production data at companies.
+*.pcap
+*.pcapng
+*.cap
+*.dmp
+captures/
+logs/
+
+# --- C++ Build Artifacts -------------------------------------
+sniffer
+*.o
+*.a
+*.so
+*.out
+build/
+
+# --- Python --------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / Frontend -----------------------------------------
+node_modules/
+dist/
+.vite/
+*.local
+
+# --- IDEs / OS -----------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# --- Docker --------------------------------------------------
+# Don't commit override files with local port/credential changes
+docker-compose.override.yml

@@ -1,0 +1,121 @@
+# .github/workflows/build.yml
+#
+# CI pipeline. Validates that the backend container builds cleanly
+# and that the C++ sniffer compiles without warnings.
+# Does NOT run the sniffer (requires CAP_NET_RAW -- unavailable in GitHub runners).
+# Does NOT run the frontend against a live backend (E2E is Phase 2).
+#
+# This pipeline exists to catch:
+#   1. Broken Dockerfile (missing deps, bad apt-get, failed g++ compile)
+#   2. Python import errors and syntax issues in main.py
+#   3. requirements.txt CVEs (pip-audit)
+#   4. Frontend build regressions (vite build --mode production)
+
+name: build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1: Build the backend Docker image and validate the sniffer compiles
+  # --------------------------------------------------------------------------
+  backend-build:
+    name: backend / docker build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set up docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build only -- no push. If this passes, the Dockerfile is valid,
+      # g++ compiled the sniffer, and pip installed all pinned deps.
+      - name: build backend image
+        run: docker build ./backend --tag netgotchi-backend:ci
+
+      # Spin up the built image and hit /health.
+      # --cap-add is available on GitHub runners (Linux).
+      # Note: sniffer will fail to open the raw socket without a real interface,
+      # but uvicorn + the health endpoint should respond within the start_period.
+      - name: smoke test - health endpoint
+        run: |
+          docker run -d \
+            --name netgotchi-ci \
+            --network host \
+            --cap-add NET_RAW \
+            --cap-add NET_ADMIN \
+            -e PYTHONUNBUFFERED=1 \
+            -e SNIFFER_BIN=./sniffer \
+            netgotchi-backend:ci
+          sleep 6
+          curl --fail --retry 3 --retry-delay 2 http://localhost:8000/health
+          docker stop netgotchi-ci
+
+  # --------------------------------------------------------------------------
+  # Job 2: Python static analysis and dependency CVE scan
+  # --------------------------------------------------------------------------
+  backend-lint:
+    name: backend / lint + audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set up python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: install deps + audit tools
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pip-audit pyflakes
+
+      # pyflakes catches unused imports (like the `time` import we removed)
+      # without the noise of a full linter. Low friction for a portfolio project.
+      - name: pyflakes static analysis
+        run: pyflakes backend/main.py
+
+      # pip-audit checks requirements.txt against OSV, PyPI Advisory DB, and GitHub Advisory DB.
+      # This is the CI equivalent of the comment already in requirements.txt.
+      - name: pip-audit dependency CVE scan
+        run: pip-audit -r backend/requirements.txt
+
+  # --------------------------------------------------------------------------
+  # Job 3: Frontend production build validation
+  # --------------------------------------------------------------------------
+  frontend-build:
+    name: frontend / vite build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set up node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # Production build catches JSX errors, missing imports, and dead code
+      # that the dev server hot-reloader tolerates silently.
+      - name: vite production build
+        working-directory: frontend
+        env:
+          VITE_API_HOST: localhost:8000
+        run: npm run build
